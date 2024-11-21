@@ -1,0 +1,840 @@
+---
+title: "ANALISE_DE_REGRESSAO"
+author: "Osbone Maquival"
+date: "2024-07-22"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+rm(list = ls())
+
+
+library(stringi)
+library(snakecase)
+library(tidyverse)
+library(broom)
+library(MASS)
+library(stats)
+library(lmtest)
+library(sandwich)
+#library(glmer)
+library(MuMIn)
+library(gtsummary)
+library(splines)
+```
+
+```{r}
+# Carregar os dados
+
+#library(dplyr)
+#library(readr)
+#library(stringi)
+#library(janitor)
+
+surveillence_data <- read_csv("Dados_de_Malaria.csv") %>%
+  mutate(Distrito = to_snake_case(Distrito),
+         Distrito = stri_trans_general(str = Distrito, id = "Latin-ASCII")) %>%
+  filter(Ano != 2024) %>%
+  mutate(Distrito = case_when(
+    Distrito == "kampfumo" ~ "kamphumo",
+    Distrito == "cidade_de_inhambane" ~ "inhambane",
+    Distrito == "cidade_de_pemba" ~ "pemba",
+    Distrito == "cidade_de_xai_xai" ~ "xai_xai",
+    Distrito == "kamaxakene" ~ "kamaxaqueni",
+    Distrito == "ngauma" ~ "n_gauma",
+    Distrito == "cidade_de_tete" ~ "tete",
+    Distrito == "alto molocue" ~ "alto_molocue",
+    Distrito == "maganja da costa" ~ "maganja_da_costa",
+    Distrito == "cidade_da_beira" ~ "beira",
+    Distrito == "cidade_de_chimoio" ~ "chimoio",
+    Distrito == "cidade_de_quelimane" ~ "quelimane",
+    Distrito == "distrito_de_lichinga" ~ "lichinga",
+    Distrito == "distrito_de_nampula" ~ "nampula",
+    Distrito == "nacala_porto" ~ "nacala",
+    Distrito == "vilankulos" ~ "vilankulo",
+    TRUE ~ as.character(Distrito)
+  )) %>%
+   mutate(Provincia = case_when(
+    Provincia == "MAPUTO PROVINCIA" ~ "MAPUTO",
+    TRUE ~ as.character(Provincia)
+  )) %>%
+  mutate(Taxa_Incidencia=rowSums(cbind(`Casos de malária confirmada (HTZ positivos) US, <5 anos` , `Casos de malária confirmada (HTZ positivos) US, ≥ 5 anos` , `Casos de malária confirmada (TDR positivos) APE, <5 anos` ,`Casos de malária confirmada (TDR positivos) APE, ≥ 5 anos`, `Casos de malária confirmada (TDR positivos) US, <5 anos`,  `Casos de malária confirmada (TDR positivos) US, ≥ 5 anos`),na.rm=T)) %>% 
+  mutate(tested = rowSums(select(., 
+    `Doentes testados para malária por HTZ US, ≥ 5 anos`,
+    `Doentes testados para malária por TDR APE, <5 anos`,
+    `Doentes testados para malária por TDR APE, ≥ 5 anos`,
+    `Doentes testados para malária por TDR US, <5 anos`,
+    `Doentes testados para malária por TDR US, ≥ 5 anos`
+  ), na.rm = TRUE))select(Ano,Mes,Pais,Provincia,Distrito,Taxa_Incidencia, tested)
+
+
+
+
+
+  
+
+moz_monthly_means_2016_2023 <- read_csv("moz_monthly_means_2016-2023.csv") %>%
+  mutate(District = tolower(District)) %>%
+  rename(
+    Provincia = Province,
+    Distrito = District,
+    Ano = year,
+    Mes = month
+  ) %>%
+  mutate(Distrito = stri_trans_general(str = Distrito, id = "Latin-ASCII")) %>%
+  mutate(Distrito = to_snake_case(Distrito))  %>%
+  mutate(Mes = recode(Mes,
+                      "Jan" = 1,
+                      "Feb" = 2,
+                      "Mar" = 3,
+                      "Apr" = 4,
+                      "May" = 5,
+                      "Jun" = 6,
+                      "Jul" = 7,
+                      "Aug" = 8,
+                      "Sep" = 9,
+                      "Oct" = 10,
+                      "Nov" = 11,
+                      "Dec" = 12))
+
+# Verificar os dados
+head(surveillence_data)
+head(moz_monthly_means_2016_2023)
+#write.csv(surveillence_data, "Dados_de_Malaria.csv", row.names = FALSE)
+```
+
+```{r}
+
+surveillence_data <- read_csv("hf_inc_2017_2023_Jan2024update.csv") %>% 
+   mutate(adm2 = snakecase::to_snake_case(adm2)) %>% 
+  rename(Provincia = adm1,
+         Distrito = adm2,
+         Ano = year,
+         Mes = month) %>% 
+  select(Ano, Mes, Provincia,Distrito, positive, tested)
+  #mutate(across(where(is.numeric), ~ifelse(is.na(.), round(mean(., na.rm = TRUE), 0), .)))
+  #mutate(adm2 = case_when(adm2 == "kamphumo" ~ "ka_mphumo",
+                         # adm2 == "kamubukwana" ~ "ka_mubukwana",
+                          #adm2 == "kamavota" ~ "ka_mavota",
+                          #adm2 == "kamaxaqueni" ~ "ka_maxaqueni",
+                          #adm2 == "katembe" ~ "ka_tembe",
+                          #adm2 == "kanyaka" ~ "ka_nyaka",
+                          #TRUE ~ as.character(adm2)
+                          #)) %>%
+  
+
+
+
+moz_monthly_means_2016_2023 <- read_csv("moz_monthly_means_2016-2023.csv") %>%
+  mutate(District = tolower(District)) %>%
+  rename(
+    Provincia = Province,
+    Distrito = District,
+    Ano = year,
+    Mes = month
+  ) %>%
+  mutate(Distrito = stri_trans_general(str = Distrito, id = "Latin-ASCII")) %>%
+  mutate(Distrito = to_snake_case(Distrito))  %>%
+  mutate(Mes = recode(Mes,
+                      "Jan" = 1,
+                      "Feb" = 2,
+                      "Mar" = 3,
+                      "Apr" = 4,
+                      "May" = 5,
+                      "Jun" = 6,
+                      "Jul" = 7,
+                      "Aug" = 8,
+                      "Sep" = 9,
+                      "Oct" = 10,
+                      "Nov" = 11,
+                      "Dec" = 12))
+
+
+#write.csv(surveillence_data, "Dados_de_Malaria.csv", row.names = FALSE)
+```
+
+
+
+```{r}
+# Verificar distritos únicos
+distritos_malaria <- unique(surveillence_data$Distrito)
+distritos_populacao <- unique(moz_monthly_means_2016_2023$Distrito)
+
+# Remover distritos extintos
+distritos_malaria <- distritos_malaria[distritos_malaria != "distrito_de_xai_xai_extinto"]
+
+# Verificar correspondência entre distritos
+correspondencia <- table(distritos_malaria %in% distritos_populacao)
+print(correspondencia)
+
+# Distritos que não têm correspondência
+distritos_nao_correspondentes <- distritos_malaria[!(distritos_malaria %in% distritos_populacao)]
+print(distritos_nao_correspondentes)
+
+# Distritos da população em ordem alfabética
+distritos_populacao_sorted <- sort(distritos_populacao)
+print(distritos_populacao_sorted)
+```
+
+
+```{r}
+# Criar nova dataframe combinando os dados
+combined_data <- full_join(surveillence_data, moz_monthly_means_2016_2023, by = c("Distrito", "Ano", "Mes")) %>%
+  arrange(Ano)
+
+# Verificar a nova dataframe combinada
+head(combined_data)
+```
+
+```{r}
+Dados_Agrupados_Província_Ano <- read_csv("Populacao_Provincia.csv")
+#head(Dados_Agrupados_Província_Ano)
+```
+
+
+
+#STANDARZATION
+```{r}
+standardize <- function(x) {
+  return ((x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE))
+}
+
+novos_casos_de_malária <- combined_data %>%
+  mutate(across(c(CHIRPS_Rainfall, EVI, LST_Day, LST_DiurnalDifference, LST_Night, TCB, TCW), standardize))
+
+```
+
+
+### CRIANDO DELAY (LAG)
+
+```{r}
+
+lagged_data <- novos_casos_de_malária %>%
+  group_by(Distrito) %>%  # Group by district to calculate lags within each district
+  arrange(Ano, Mes) %>%
+  mutate(
+    rainfall_lag1 = lag(CHIRPS_Rainfall, 1),
+    rainfall_lag2 = lag(CHIRPS_Rainfall, 2),
+    rainfall_lag3 = lag(CHIRPS_Rainfall, 3),
+    EVI_lag1 = lag(EVI, 1),
+    EVI_lag2 = lag(EVI, 2),
+    EVI_lag3 = lag(EVI, 3),
+    LST_Daytime_lag1 = lag(LST_Day, 1),
+    LST_Daytime_lag2 = lag(LST_Day, 2),
+    LST_Daytime_lag3 = lag(LST_Day, 3),
+    LST_Nighttime_lag1 = lag(LST_Night, 1),
+    LST_Nighttime_lag2 = lag(LST_Night, 2),
+    LST_Nighttime_lag3 = lag(LST_Night, 3),
+    LST_Diurnal_lag1 = lag(LST_DiurnalDifference, 1),
+    LST_Diurnal_lag2 = lag(LST_DiurnalDifference, 2),
+    LST_Diurnal_lag3 = lag(LST_DiurnalDifference, 3),
+    TCB_lag1 = lag(TCB, 1),
+    TCB_lag2 = lag(TCB, 2),
+    TCB_lag3 = lag(TCB, 3),
+    TCW_lag1 = lag(TCW, 1),
+    TCW_lag2 = lag(TCW, 2),
+    TCW_lag3 = lag(TCW, 3)
+  ) %>%
+  rename(Provincia = Provincia.x)%>%
+  ungroup()
+
+head(lagged_data)
+tail(lagged_data)
+```
+
+```{r}
+# Realizar o merge usando as colunas "Provincia" e "Ano"
+dados_combinados <- merge(lagged_data, Dados_Agrupados_Província_Ano, 
+                          by = c("Provincia", "Ano"))
+```
+
+
+```{r}
+dados_combinados <- dados_combinados %>%
+  select("Ano",
+         "Provincia",
+         "Distrito",
+         "Mes",
+         "positive",
+         "tested",
+         "Populacao_total_por_provincia_ano",
+      "rainfall_lag1", 
+    "rainfall_lag1", 
+    "rainfall_lag2",
+    "rainfall_lag3", 
+    "EVI_lag1", 
+    "EVI_lag2", 
+    "EVI_lag3",
+    "LST_Daytime_lag1",
+    "LST_Daytime_lag2",
+    "LST_Daytime_lag3",
+    "LST_Nighttime_lag1", 
+    "LST_Nighttime_lag2",
+    "LST_Nighttime_lag3",
+    "LST_Diurnal_lag1", 
+    "LST_Diurnal_lag2",
+    "LST_Diurnal_lag3",
+    "TCB_lag1", 
+    "TCB_lag2", 
+    "TCB_lag3",
+    "TCW_lag1",
+    "TCW_lag2",
+    "TCW_lag3",
+    ) %>%
+  arrange(Mes)
+```
+
+```{r}
+# Calcular a Taxa de Positividade
+dados_combinados <- dados_combinados %>%
+  mutate(Taxa_Positividade = (positive / tested) * 100)
+
+# Calcular a Taxa de Incidência, arredondar para números inteiros, e garantir que valores zero sejam ajustados para 1
+dados_combinados <- dados_combinados %>%
+  mutate(Taxa_Incidencia = ((positive / Populacao_total_por_provincia_ano) * 100000))
+
+# Verificar as primeiras linhas do resultado
+head(dados_combinados)
+
+
+```
+
+
+
+```{r}
+# Supondo que os dados estejam no dataframe chamado 
+data <-  dados_combinados %>% 
+  filter(Distrito != "distrito_de_xai_xai_extinto") %>% # Substitua pelo nome do seu dataframe  
+  mutate(Data = make_date(Ano, Mes, 1)) 
+
+# Ordenar os dados por data
+data <- data %>% arrange(Data)
+
+# Criar o objeto de série temporal
+  #ts_data <- ts(data$Taxa_Incidencia, start = c(min(data$Ano), min(data$Mes)), frequency = 12)
+
+#write.csv(data, "data_1.csv", row.names = FALSE)
+```
+
+
+
+
+```{r}
+data_filtered <- dados_combinados 
+
+# Criar o gráfico com o intervalo filtrado
+ggplot(data_filtered, aes(x = Ano, y = Taxa_Incidencia, color = Provincia)) +
+  geom_smooth(method = "loess", se = FALSE) +
+  labs(
+    title = "Malaria Incidence Rate Trends by Province",
+    x = "Data",
+    y = "Incidence Rate (per 1000 inhabitants)",
+    color = "Province"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+```{r}
+boxplot(data$Taxa_Incidencia)
+```
+
+```{r}
+data_summary <- data_filtered %>%
+  group_by(Ano) %>%
+  summarise(
+    positive = sum(positive, na.rm = TRUE),
+    tested = sum(tested, na.rm = TRUE)
+  ) %>%
+  mutate(positivity_rate = positive / tested * 100)
+
+
+
+ggplot(data_summary, aes(x = Ano, y = positivity_rate)) +
+  geom_line(size = 1, color = "blue")+
+  labs(title = "Positivity Rate per Year (2017-2023)",
+       x = "Year",
+       y = "Positivity Rate (%)") +
+   geom_smooth(colour = "yellow")+
+  theme_minimal()
+```
+```{r}
+data_summary <- data_filtered %>%
+  group_by(Ano) %>%
+  summarise(
+    positive = sum(positive, na.rm = TRUE),
+    tested = sum(tested, na.rm = TRUE)
+  ) %>%
+  mutate(positivity_rate = positive / tested * 100)
+
+ggplot(data_summary, aes(x = Ano, y = positivity_rate)) +
+  geom_line(size = 1, color = "blue") +
+  geom_text(aes(label = sprintf("%.1f%%", positivity_rate)), vjust = -0.5, color = "black") +
+  labs(title = "Positivity Rate per Year (2017-2023)",
+       x = "Year",
+       y = "Positivity Rate (%)") +
+  geom_smooth(colour = "yellow") +
+  theme_minimal()
+
+```
+
+
+The chart shows a breakdown of the malaria positivity rate from 2017 to 2023, with the blue line indicating the actual rate and the yellow line representing a smoothed trend. The gray shading around the yellow line indicates confidence in the trend estimate, helping to visualize uncertainty in the data over time.
+
+
+
+### FAZER EDA E ALGUMAS ESTATISTICAS DE INCIDENCE_RATE
+
+
+
+```{r}
+
+# Filtrar os dados para o período de 2017 a 2023
+#filtered_data <- filtered_data %>%
+ # filter(Ano >= 2017 & Ano <= 2023)
+
+# Contar o número de zeros na variável Taxa_Incidencia
+num_zeros <- sum(data_filtered$Taxa_Incidencia == 0)
+
+# Calcular o total de observações
+total_observations <- length(data_filtered$Taxa_Incidencia)
+
+# Calcular a proporção de zeros
+proportion_zeros <- num_zeros / total_observations
+
+# Exibir o resultado
+num_zeros
+
+# Exibir a proporção de zeros
+proportion_zeros
+
+#write.csv(filtered_data, "filtered_data.csv", row.names = FALSE)
+```
+
+
+#### IRS DATA
+```{r}
+IRS_DATA <- read_csv("IRS_DISTRICTS.csv") %>%
+  mutate(adm2 = to_snake_case(adm2),
+         adm2 = stri_trans_general(str = adm2, id = "Latin-ASCII")) %>%
+  rename(Provincia = adm1,
+         Distrito = adm2,
+         Ano = year) %>%
+  mutate(Ano_ajustado = if_else(mounth_final %in% c("January", "February", "March"), 
+                                Ano + 1, Ano))
+
+#library(dplyr)
+
+# Excluir os distritos de nacala_porto e cidade_de_nampula
+IRS_DATA <- IRS_DATA %>%
+  filter(!(Distrito %in% c("nacala_porto", "cidade_de_nampula")))
+
+# Para visualizar as primeiras linhas do dataframe atualizado
+head(IRS_DATA)
+
+
+# Para visualizar as primeiras linhas do dataframe
+head(IRS_DATA)
+
+```
+
+```{r}
+
+# Função auxiliar para converter nomes dos meses em números
+month_to_number <- function(month_name) {
+  match(tolower(month_name), tolower(month.name))
+}
+
+# Cálculo da duração da campanha e criação do histograma
+IRS_DATA <- IRS_DATA %>%
+  mutate(mounth_init_num = month_to_number(mounth_init),
+         mounth_final_num = month_to_number(mounth_final),
+         duration_months = if_else(mounth_final_num < mounth_init_num, 
+                                   12 - mounth_init_num + mounth_final_num + 1, 
+                                   mounth_final_num - mounth_init_num + 1))
+
+# Histograma da duração da campanha por província
+ggplot(IRS_DATA, aes(x = duration_months)) +
+  geom_histogram(binwidth = 1, fill = "skyblue", color = "red") +
+  labs(title = "Duration of the Spraying Campaign by Province (in months)",
+       x = "Duration (months)", 
+       y = "Number of districts") +
+  theme_minimal() +
+  facet_wrap(~ Provincia)
+
+
+# Boxplot da duração da campanha por província
+ggplot(IRS_DATA, aes(x = Provincia, y = duration_months, fill = Provincia)) +
+  geom_boxplot(outlier.color = "red", outlier.shape = 16, outlier.size = 2) +
+  labs(title = "Distribution of the Spraying Campaign Duration by Province",
+       x = "Province", 
+       y = "Duration (months)") +
+  theme_minimal() +
+  theme(legend.position = "none")  # Remove a legenda, já que as cores correspondem às províncias
+
+```
+```{r}
+# Replotting the histogram with correct axis scaling
+ggplot(data = IRS_DATA, aes(x = IRS_coverage)) +
+  geom_histogram(binwidth = 0.02, fill = "blue", color = "black", alpha = 0.7) +
+  facet_wrap(~ Provincia) +
+  labs(title = "Histogram of IRS Coverage by Province", x = "IRS Coverage (%)", y = "Frequency") +
+  scale_x_continuous(limits = c(0.6, 1.0), breaks = seq(0.6, 1.0, by = 0.05))
+
+```
+```{r}
+IRS_DATA <- IRS_DATA %>%
+  mutate(Coverage_Category = case_when(
+    IRS_coverage >= 0.95 ~ "High Coveragea",
+    IRS_coverage >= 0.85 ~ "Moderate Coverage",
+    TRUE ~ "Low Coverage"
+  ))
+
+table(IRS_DATA$Coverage_Category)
+summary(IRS_DATA$IRS_coverage ~ IRS_DATA$Coverage_Category)
+ggplot(IRS_DATA, aes(x = Coverage_Category, y = IRS_coverage)) +
+  geom_boxplot() +
+  labs(title = "IRS Coverage by Coverage Category", x = "Coverage Category", y = "IRS Coverage")
+
+ggplot(IRS_DATA, aes(x = Coverage_Category)) +
+  geom_bar() +
+  labs(title = "Frequency of IRS Coverage Categories", x = "Coverage Category", y = "Count")
+
+ggplot(IRS_DATA, aes(x = Coverage_Category)) +
+  geom_bar() +
+  facet_wrap(~ Distrito, scales = "free_y") +  # Cria subplots para cada distrito
+  labs(title = "Frequency of IRS Coverage Categories by District", 
+       x = "Coverage Category", 
+       y = "Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Ajusta o texto do eixo x para melhor leitura
+
+```
+```{r}
+ggplot(IRS_DATA, aes(x = Ano, y = IRS_coverage, color = Coverage_Category)) +
+  geom_line(aes(group = Distrito)) +
+  geom_point(aes(group = Distrito)) +
+  facet_wrap(~ Distrito) +  # Remover 'scales = "free_y"' para fixar a escala
+  labs(title = "Temporal Variation of IRS Coverage by District", 
+       x = "Year", 
+       y = "IRS Coverage") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+```{r}
+Join <- left_join(data_filtered, IRS_DATA, by = c("Distrito", "Ano")) %>%
+  arrange(Ano) %>% select(-Provincia.y, -mounth_init, -mounth_init_num, -mounth_final, -Ano_ajustado,
+                          -mounth_final_num, -duration_months, -Coverage_Category, -tested, -Populacao_total_por_provincia_ano, -Taxa_Positividade) %>%
+  rename(Provincia = Provincia.x)
+```
+
+```{r}
+
+implemented<-c("boane", "magude", "manhica", "marracuene", "moamba", "namaacha", 
+"matola", "matutuine", "chibuto", "bilene", "limpopo", "chongoene", 
+"mandlakazi", "guija", "inhambane", "maxixe", "homoine", "massinga", 
+"morrumbene", "inharrime", "panda", "zavala", "mocuba", "milange", 
+"molumbo", "morrumbala", "derre", "mopeia", "maganja_da_costa", 
+"meconta", "monapo", "nampula", "murrupula", 
+"angoche", "rapale", "ribaue", "muecate", "nacala",
+"erati")
+
+```
+
+```{r}
+Join %>% mutate(time=1:176786) %>% filter(Distrito%in%implemented) %>% ggplot(aes(x=time,y=positive))+
+  geom_line()+
+  facet_wrap(~ Distrito)
+```
+
+```{r}
+Join_IRS<- Join %>%  filter(Distrito%in%implemented) 
+
+Ester <- Join_IRS %>%
+  # Ordenação dos dados por Ano e Mes para garantir a sequência temporal correta
+  arrange(Ano, Mes) %>%
+  
+  # Criação da variável de data para facilitar o cálculo
+  mutate(
+    date = as.Date(paste(Ano, Mes, "01", sep = "-")),
+    
+    # Criação da variável de tempo (T) baseada na ordem das observações
+    time = row_number(),
+    
+    # Criação da variável binária IRS (0 antes de outubro de 2020, 1 a partir de outubro de 2020)
+    IRS = if_else(date >= as.Date("2020-10-01"), 1, 0),
+    
+    # Criação do termo de interação para tempo e IRS (cumsum conta a partir de 1 onde IRS é 1)
+    time_IRS = if_else(IRS == 1, cumsum(IRS), 0)
+  ) 
+```
+
+
+```{r}
+# Remover as linhas onde 'IRS' ou 'Taxa_Incidencia' são NA
+clean_data <- Ester %>%
+  filter(!is.na(IRS) & !is.na(positive))
+
+
+# Verificar o número de linhas restantes após a remoção de NAs
+nrow(clean_data)  # Número de linhas após a remoção
+nrow(Ester)       # Número de linhas originais
+
+```
+
+
+```{r}
+#library(glmmTMB)
+
+mod_nbinom <- glmmTMB(
+  positive ~ IRS + EVI_lag1 + EVI_lag3 + TCB_lag1  + (1 | Distrito/Ano),
+  data = clean_data,
+  family = nbinom2
+)
+summary(mod_nbinom)
+```
+
+
+
+
+
+
+```{r}
+# Rodar todos os modelos
+
+# Modelo 1
+mod1_tmb <- glmmTMB(positive ~ IRS + TCB_lag1 + TCW_lag1 + EVI_lag1 + 
+                    (1 | Distrito/Ano),
+                    data = clean_data, 
+                    family = nbinom2)
+
+# Modelo 2
+mod2_tmb <- glmmTMB(positive ~ IRS + TCB_lag2 + TCW_lag2 + EVI_lag2 + 
+                    (1 | Distrito/Ano),
+                    data = clean_data, 
+                    family = nbinom2)
+
+# Modelo 3
+mod3_tmb <- glmmTMB(positive ~ IRS + TCB_lag3 + TCW_lag3 + EVI_lag3 + 
+                    (1 | Distrito/Ano),
+                    data = clean_data, 
+                    family = nbinom2)
+
+# Modelo 4
+mod4_tmb <- glmmTMB(positive ~ IRS + TCB_lag1 + TCW_lag2 + EVI_lag3 + 
+                    (1 | Distrito/Ano),
+                    data = clean_data, 
+                    family = nbinom2)
+
+# Modelo 5
+mod5_tmb <- glmmTMB(positive ~ IRS + TCB_lag2 + TCW_lag3 + EVI_lag1 + 
+                    (1 | Distrito/Ano),
+                    data = clean_data, 
+                    family = nbinom2)
+
+
+
+# Comparar os modelos usando AIC e BIC
+model_comparison <- data.frame(
+  Model = c("mod1", "mod2", "mod3", "mod4", "mod5"),
+  AIC = c(AIC(mod1_tmb), AIC(mod2_tmb), AIC(mod3_tmb), AIC(mod4_tmb), AIC(mod5_tmb)),
+  BIC = c(BIC(mod1_tmb), BIC(mod2_tmb), BIC(mod3_tmb), BIC(mod4_tmb), BIC(mod5_tmb))
+)
+
+# Ver os resultados
+print(model_comparison)
+
+```
+
+```{r}
+summary(mod1_tmb)
+summary(mod2_tmb)
+summary(mod3_tmb)
+summary(mod4_tmb)
+summary(mod5_tmb)
+```
+
+```{r}
+
+
+# Modelo 1
+modelo1_tmb <- glmmTMB(positive ~ IRS + TCB_lag1 + (1 | Distrito/Ano), 
+                        data = clean_data, 
+                        family = nbinom2)
+
+# Modelo 2
+modelo2_tmb <- glmmTMB(positive ~ IRS + TCW_lag1 + (1 | Distrito/Ano), 
+                        data = clean_data, 
+                        family = nbinom2)
+
+# Modelo 3
+modelo3_tmb <- glmmTMB(positive ~ IRS + EVI_lag1 + (1 | Distrito/Ano), 
+                        data = clean_data, 
+                        family = nbinom2)
+
+# Modelo 4
+modelo4_tmb <- glmmTMB(positive ~ IRS + TCB_lag1 + EVI_lag1 + (1 | Distrito/Ano), 
+                        data = clean_data, 
+                        family = nbinom2)
+
+# Modelo 5
+modelo5_tmb <- glmmTMB(positive ~ IRS + TCW_lag1 + EVI_lag1 + (1 | Distrito/Ano), 
+                        data = clean_data, 
+                        family = nbinom2)
+
+# Resumo do modelo 5
+#summary(modelo5_tmb)
+
+```
+
+
+
+```{r}
+# Comparar os modelos usando AIC e BIC
+model_comparison1 <- data.frame(
+  Model = c("modelo1", "modelo2", "modelo3", "modelo4", "modelo5"),  # Correção de nomes
+  AIC = c(AIC(modelo1_tmb), AIC(modelo2_tmb), AIC(modelo3_tmb), AIC(modelo4_tmb), AIC(modelo5_tmb)),  # Adicionado modelo5
+  BIC = c(BIC(modelo1_tmb), BIC(modelo2_tmb), BIC(modelo3_tmb), BIC(modelo4_tmb), BIC(modelo5_tmb))   # Adicionado modelo5
+)
+
+# Ver os resultados
+print(model_comparison1)
+summary(modelo2_tmb)
+```
+
+```{r}
+modelo1_tmb <- glmmTMB(positive ~ IRS + rainfall_lag1+ rainfall_lag2+ rainfall_lag3 +LST_Daytime_lag1+LST_Daytime_lag2
+                       +LST_Daytime_lag3+LST_Nighttime_lag1+LST_Nighttime_lag2+LST_Nighttime_lag3+
+                         (1 | Distrito/Ano), 
+                        data = clean_data, 
+                        family = nbinom2)
+
+summary(modelo1_tmb)
+```
+
+
+
+```{r}
+length(fitted.values(modelo2_tmb))
+```
+
+
+```{r}
+
+ber<-clean_data %>% mutate(ri=fitted.values(modelo2_tmb)) 
+
+ggplot(ber,aes(x=date,y=positive,col="blue"))+
+  geom_line()+
+  geom_line(aes(y=ri,col="red"))+
+  facet_wrap(~Distrito)+
+  scale_color_manual(values = c("red"="red","blue"="blue"))
+```
+```{r}
+ber <- clean_data %>% mutate(ri = fitted.values(modelo2_tmb)) 
+
+ggplot(ber, aes(x = date)) +
+  geom_line(aes(y = positive, color = "Total Positive Cases")) +
+  geom_line(aes(y = ri, color = "Predicted Cases")) +
+  facet_wrap(~Provincia) +
+  scale_color_manual(values = c("Total Positive Cases" = "blue", "Predicted Cases" = "red")) +
+  labs(color = "Legend") +  # Set the title of the legend
+  theme_minimal()  # Optional: use a minimal theme for a cleaner look
+
+```
+
+```{r}
+fotted<-fitted.values(modelo2_tmb)
+counterfactua<- fotted-0.081744   *(0- clean_data$IRS)
+```
+
+
+```{r}
+clean_data<-clean_data %>% mutate(ri=fitted.values(modelo2_tmb), counterfactual=counterfactua) 
+
+#%>% filter( Distrito%in%c("nampula","chibuto") )
+clean_data  %>% ggplot(aes(x=date,y=positive,col="observed"))+
+  geom_line()+
+  geom_line(aes(y=ri,col="fitted"))+
+  geom_line(aes(y=counterfactual,col="counter"))+
+  #geom_vline(aes(xintercept = rep(as.Date("2020-10-01"),3276)),linetype="dotted",col="red")+
+  scale_color_manual(values = c("observed"="red","fitted"="yellow","counter"="black"))+
+  facet_wrap(~Provincia)
+```
+
+```{r}
+
+# Agregando a taxa de incidência por mês
+clean_data_summary <- clean_data %>%
+  group_by(Provincia, month = floor_date(date, "month")) %>%
+  summarize(
+    mean_taxa = mean(positive, na.rm = TRUE),
+    mean_ri = mean(ri, na.rm = TRUE),
+    mean_counterfactual = mean(counterfactual, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+```
+
+
+```{r}
+
+
+clean_data_summary %>%
+  ggplot(aes(x = month, y = mean_taxa, col = "observed")) +
+  geom_line() +
+  geom_line(aes(y = mean_ri, col = "fitted")) +
+  geom_line(aes(y = mean_counterfactual, col = "counter")) +
+  scale_color_manual(values = c("observed" = "red", "fitted" = "yellow", "counter" = "black")) +
+  labs(x = "Mês", y = "Taxa de Incidência Média", title = "Taxa de Incidência de Malária por Província") +
+  facet_wrap(~Provincia) +
+  theme_minimal()
+
+```
+```{r}
+clean_data_summary <- clean_data %>%
+  group_by(Provincia, month = floor_date(date, "month")) %>%
+  summarize(
+    mean_taxa = mean(positive, na.rm = TRUE),
+    mean_ri = mean(ri, na.rm = TRUE),
+    mean_counterfactual = mean(counterfactual, na.rm = TRUE),
+    sd_taxa = sd(Taxa_Incidencia, na.rm = TRUE),
+    n = n(),
+    se_taxa = sd_taxa / sqrt(n),
+    lower_ci = mean_taxa - 1.96 * se_taxa,
+    upper_ci = mean_taxa + 1.96 * se_taxa,
+    .groups = 'drop'
+  )
+
+```
+
+```{r}
+clean_data_summary %>%
+  ggplot(aes(x = month, y = mean_taxa, col = "observed")) +
+  geom_line() +
+  geom_ribbon(aes(ymin = lower_ci, ymax = upper_ci), alpha = 0.2) +
+  geom_line(aes(y = mean_ri, col = "fitted")) +
+  geom_line(aes(y = mean_counterfactual, col = "counter")) +
+  scale_color_manual(values = c("observed" = "red", "fitted" = "yellow", "counter" = "black")) +
+  labs(x = "Month", y = "Average Incidence Rate", title = "Malaria Incidence Rate by Province") +
+  facet_wrap(~Provincia) +
+  theme_minimal()
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
